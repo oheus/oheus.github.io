@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM API 토큰 비용 &amp; 로컬 추론 손익분기 계산기 | LLM Cost Matrix</title>
+  <meta name="description" content="OpenAI, Anthropic, Google, DeepSeek 모델의 입출력 토큰 단가를 실시간 원화/달러로 환산하고 로컬 하드웨어(Ollama) 전력 소비 대비 손익분기점을 산출하는 엔지니어링 도구입니다.">
+  <meta name="keywords" content="LLM API 가격 비교, 토큰 원화 계산기, GPT-4o 비용, Claude 3.5 Sonnet 단가, Gemini Flash 요율, DeepSeek V3 비용, 로컬 LLM 전기세">
+  <link rel="stylesheet" href="style.css">
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "LLM API Cost & Inference Matrix",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "All",
+    "browserRequirements": "Requires JavaScript"
+  }
+  </script>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <div class="brand-row">
+        <span class="system-id">SYS.BENCH // LLM-COST-MATRIX</span>
+        <div class="unit-toggle" role="group" aria-label="통화 선택">
+          <button type="button" class="toggle-btn active" id="btnKRW" data-currency="KRW">KRW (₩)</button>
+          <button type="button" class="toggle-btn" id="btnUSD" data-currency="USD">USD ($)</button>
+        </div>
+      </div>
+      <h1 class="headline">LLM 추론 비용 및 로컬 전력 손익분기 계산기</h1>
+      <p class="lead">프롬프트 규모와 일일 파이프라인 호출 횟수를 설정하면 클라우드 7대 모델의 실시간 누적 비용과 로컬 호스팅 대비 손익분기를 계산합니다.</p>
+    </header>
+
+    <!-- 애드센스 규격 반응형 슬롯 (상단) -->
+    <aside class="ad-slot top-slot" aria-label="광고 영역">
+      <div class="ad-frame">
+        <span class="ad-label">ADVERTISEMENT</span>
+      </div>
+    </aside>
+
+    <main class="workbench">
+      <!-- 1. 제어 콘솔 (파라미터 입력) -->
+      <section class="panel console-panel" aria-labelledby="sec-params">
+        <div class="panel-head">
+          <h2 id="sec-params" class="panel-title">인풋 파라미터 (Parameters)</h2>
+          <span class="status-indicator">READY</span>
+        </div>
+
+        <div class="control-row">
+          <div class="label-group">
+            <label for="charCount">1회 입력 분량 (글자수)</label>
+            <span class="metric-readout" id="readoutTokens">~1,700 tokens</span>
+          </div>
+          <div class="stepper-input">
+            <input type="number" id="charCount" value="2000" min="50" max="100000" step="100">
+            <span class="unit-suffix">chars</span>
+          </div>
+          <input type="range" id="charSlider" min="100" max="20000" step="100" value="2000" class="range-slider">
+        </div>
+
+        <div class="control-row">
+          <div class="label-group">
+            <label for="outputRatio">응답 분량 비율 (Output / Input)</label>
+            <span class="metric-readout" id="readoutRatio">1.0x</span>
+          </div>
+          <select id="outputRatio" class="select-input">
+            <option value="0.25">단답형 요약 (0.25x)</option>
+            <option value="0.5">단문 질의응답 (0.5x)</option>
+            <option value="1.0" selected>대화 및 일반 코드 생성 (1.0x)</option>
+            <option value="2.0">장문 아티클 및 리팩토링 (2.0x)</option>
+            <option value="4.0">심층 분석 보고서 생성 (4.0x)</option>
+          </select>
+        </div>
+
+        <div class="control-row">
+          <div class="label-group">
+            <label for="dailyCalls">일일 파이프라인 호출 횟수</label>
+            <span class="metric-readout" id="readoutCalls">50 req/day</span>
+          </div>
+          <div class="stepper-input">
+            <input type="number" id="dailyCalls" value="50" min="1" max="10000" step="5">
+            <span class="unit-suffix">req</span>
+          </div>
+          <input type="range" id="callsSlider" min="1" max="500" step="5" value="50" class="range-slider">
+        </div>
+
+        <div class="control-grid-2">
+          <div class="control-mini">
+            <label for="exchangeRate">기준 환율 (USD/KRW)</label>
+            <input type="number" id="exchangeRate" value="1380" step="5" class="mini-input">
+          </div>
+          <div class="control-mini">
+            <label for="localWatt">로컬 호스트 소비전력 (W)</label>
+            <input type="number" id="localWatt" value="130" step="10" class="mini-input">
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. 매트릭스 결과 뷰 -->
+      <section class="panel matrix-panel" aria-labelledby="sec-matrix">
+        <div class="panel-head">
+          <h2 id="sec-matrix" class="panel-title">모델별 비용 비교 매트릭스</h2>
+          <div class="period-toggle">
+            <span class="period-label">산출 기준:</span>
+            <button type="button" class="sub-toggle active" id="periodMonthly" data-period="month">월간 (30일)</button>
+            <button type="button" class="sub-toggle" id="periodCall" data-period="call">1회 호출</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th scope="col">모델 식별자</th>
+                <th scope="col">1M 토큰 요율 (In / Out)</th>
+                <th scope="col">단위 호출</th>
+                <th scope="col" class="num-col">합산 산출 비용</th>
+              </tr>
+            </thead>
+            <tbody id="matrixTbody">
+              <!-- JS 동적 렌더링 -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 로컬 추론 손익분기 오딧 블록 -->
+        <div class="local-audit-strip">
+          <div class="audit-head">
+            <span class="audit-tag">LOCAL vs API AUDIT</span>
+            <span class="audit-title">로컬 Ollama/Llama 호스팅 손익분기점</span>
+          </div>
+          <div class="audit-content" id="auditContent">
+            <!-- JS 동적 계산 텍스트 -->
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 기술 문서 및 FAQ (SEO 인덱싱 대응) -->
+    <section class="specs-section">
+      <h3 class="section-heading">계산 메커니즘 및 FAQ</h3>
+      <div class="spec-grid">
+        <article class="spec-card">
+          <h4>토큰 산출 계수</h4>
+          <p>한글/영문 혼합 데이터 기준 1글자는 평균 0.85토큰으로 환산됩니다. OpenAI tiktoken(cl100k/o200k) 및 Anthropic/Gemini 네이티브 토크나이저의 중간값을 적용합니다.</p>
+        </article>
+        <article class="spec-card">
+          <h4>전력 요금 산정 기준</h4>
+          <p>한국전력 주택용 저압 2단계 누진세 구간 요율(215.2원/kWh)을 적용하며, 1회 응답 시 하드웨어 부하 지속 시간을 평균 8초로 계산합니다.</p>
+        </article>
+        <article class="spec-card">
+          <h4>로컬 하드웨어 전환 분기</h4>
+          <p>월 3,000건 미만의 호출에서는 API(Gemini Flash / DeepSeek) 사용이 GPU 하드웨어 감가상각비와 대기 전력 대비 비용 효율적입니다.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- 애드센스 규격 반응형 슬롯 (하단) -->
+    <aside class="ad-slot bottom-slot" aria-label="광고 영역">
+      <div class="ad-frame">
+        <span class="ad-label">ADVERTISEMENT</span>
+      </div>
+    </aside>
+
+    <footer class="colophon">
+      <div class="colophon-meta">
+        <span>SPEC-REV: 2026.11 // RATES: OFFICIAL PROVIDER DOCS</span>
+        <span>NO TRACKING // CLIENT-SIDE CALCULATION ONLY</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
